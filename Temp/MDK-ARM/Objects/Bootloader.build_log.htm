@@ -1,0 +1,77 @@
+<html>
+<body>
+<pre>
+<h1>µVision Build Log</h1>
+<h2>Tool Versions:</h2>
+IDE-Version: µVision V5.29.0.0
+Copyright (C) 2019 ARM Ltd and ARM Germany GmbH. All rights reserved.
+License Information: Bui Hoang, Bach Khoa, LIC=JL28G-V032V-12KLE-53J20-6WJZC-4G2J9
+ 
+Tool Versions:
+Toolchain:       MDK-ARM Plus  Version: 5.29.0.0
+Toolchain Path:  C:\Keil_v5\ARM\ARMCC\Bin
+C Compiler:      Armcc.exe V5.06 update 6 (build 750)
+Assembler:       Armasm.exe V5.06 update 6 (build 750)
+Linker/Locator:  ArmLink.exe V5.06 update 6 (build 750)
+Library Manager: ArmAr.exe V5.06 update 6 (build 750)
+Hex Converter:   FromElf.exe V5.06 update 6 (build 750)
+CPU DLL:         SARMCM3.DLL V5.29.0.0
+Dialog DLL:      DCM.DLL V1.17.3.0
+Target DLL:      STLink\ST-LINKIII-KEIL_SWO.dll V3.0.7.0
+Dialog DLL:      TCM.DLL V1.36.5.0
+ 
+<h2>Project:</h2>
+C:\Users\Administrator\Desktop\VDK_Core\Temp\MDK-ARM\Bootloader.uvprojx
+Project File Date:  08/17/2026
+
+<h2>Output:</h2>
+*** Using Compiler 'V5.06 update 6 (build 750)', folder: 'C:\Keil_v5\ARM\ARMCC\Bin'
+Rebuild target 'Target 1'
+assembling startup_stm32f10x_md.s...
+compiling system_stm32f10x.c...
+compiling bootloader_main.c...
+..\..\Code_Core\Bootloader\bootloader_main.c(61): warning:  #61-D: integer operation result is out of range
+      GPIOA->CRL &= ~((0xF << 16) | (0xF << 20) | (0xF << 28));
+..\..\Code_Core\Bootloader\bootloader_main.c(174): warning:  #223-D: function "snprintf" declared implicitly
+      snprintf(cmd, sizeof(cmd), "AT+CWJAP=\"%s\",\"%s\"\r\n", WIFI_SSID, WIFI_PASS);
+..\..\Code_Core\Bootloader\bootloader_main.c(234): warning:  #223-D: function "snprintf" declared implicitly
+      snprintf(httpReq, sizeof(httpReq),
+..\..\Code_Core\Bootloader\bootloader_main.c: 3 warnings, 0 errors
+linking...
+Program Size: Code=3688 RO-data=268 RW-data=8 ZI-data=2144  
+FromELF: creating hex file...
+".\Objects\Bootloader.axf" - 0 Error(s), 3 Warning(s).
+
+<h2>Software Packages used:</h2>
+
+Package Vendor: ARM
+                http://www.keil.com/pack/ARM.CMSIS.5.6.0.pack
+                ARM.CMSIS.5.6.0
+                CMSIS (Cortex Microcontroller Software Interface Standard)
+   * Component: CORE Version: 5.3.0
+
+Package Vendor: Keil
+                https://www.keil.com/pack/Keil.STM32F1xx_DFP.2.4.1.pack
+                Keil.STM32F1xx_DFP.2.4.1
+                STMicroelectronics STM32F1 Series Device Support, Drivers and Examples
+   * Component: Startup Version: 1.0.0
+
+<h2>Collection of Component include folders:</h2>
+  .\RTE\Device\STM32F103C8
+  .\RTE\_Target_1
+  C:\Users\Administrator\AppData\Local\Arm\Packs\ARM\CMSIS\5.6.0\CMSIS\Core\Include
+  C:\Users\Administrator\AppData\Local\Arm\Packs\Keil\STM32F1xx_DFP\2.4.1\Device\Include
+
+<h2>Collection of Component Files used:</h2>
+
+   * Component: ARM::CMSIS:CORE:5.3.0
+
+   * Component: Keil::Device:Startup:1.0.0
+      Source file:   Device\Source\ARM\startup_stm32f10x_md.s
+      Include file:  RTE_Driver\Config\RTE_Device.h
+      Source file:   Device\Source\system_stm32f10x.c
+      Source file:   Device\Source\ARM\STM32F1xx_OPT.s
+Build Time Elapsed:  00:00:01
+</pre>
+</body>
+</html>
