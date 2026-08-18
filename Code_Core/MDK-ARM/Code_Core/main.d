@@ -27,6 +27,8 @@ code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_adc_ex.h
 code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash.h
 code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash_ex.h
 code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h
+code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h
+code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h
 code_core\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_uart.h
 code_core\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os.h
 code_core\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/FreeRTOS.h
@@ -40,6 +42,6 @@ code_core\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h
 code_core\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/include/list.h
 code_core\main.o: ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2/cmsis_os2.h
 code_core\main.o: ../Core/Inc/adc.h
-code_core\main.o: ../Core/Inc/dma.h
+code_core\main.o: ../Core/Inc/tim.h
 code_core\main.o: ../Core/Inc/usart.h
 code_core\main.o: ../Core/Inc/gpio.h

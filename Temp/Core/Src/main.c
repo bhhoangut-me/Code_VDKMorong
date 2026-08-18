@@ -207,7 +207,7 @@ static uint8_t OTA_Download(void)
 
     /* 4. Unlock va xoa Flash TRUOC KHI gui GET de khong mat du lieu TCP */
     HAL_FLASH_Unlock();
-    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPRTERR);
+    __HAL_FLASH_CLEAR_FLAG(FLASH_FLAG_EOP | FLASH_FLAG_PGERR | FLASH_FLAG_WRPERR);
     eraseInit.TypeErase   = FLASH_TYPEERASE_PAGES;
     eraseInit.Banks       = FLASH_BANK_1;
     eraseInit.NbPages     = 1;

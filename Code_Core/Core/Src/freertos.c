@@ -21,13 +21,14 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "main.h"
-#include "adc.h"
 #include "cmsis_os.h"
-#include "usart.h"
-#include "stdio.h"
+
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "adc.h"
+#include "usart.h"
+#include "stdio.h"
+#include "tim.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,6 +50,8 @@
 /* USER CODE BEGIN Variables */
 volatile uint32_t adc_value = 0;
 volatile uint8_t prev_but1=1,prev_but2=1,prev_but3=1;
+uint32_t cpr=1562;
+uint16_t prev_cnt=0;
 typedef enum mode_motor{
 	FORWARD,
 	REVERSE,
@@ -95,7 +98,7 @@ const osThreadAttr_t EncoderTask_attributes = {
 osThreadId_t ESPTaskHandle;
 const osThreadAttr_t ESPTask_attributes = {
   .name = "ESPTask",
-  .stack_size = 256 * 4,
+  .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for OTATask */
@@ -128,7 +131,7 @@ const osEventFlagsAttr_t myEvent01_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-
+void OTA_TriggerUpdate(void);
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void *argument);
@@ -171,7 +174,7 @@ void MX_FREERTOS_Init(void) {
 
   /* Create the queue(s) */
   /* creation of motorCommandQueue */
-  motorCommandQueueHandle = osMessageQueueNew (16, sizeof(mode_motor), &motorCommandQueue_attributes);
+  motorCommandQueueHandle = osMessageQueueNew (16, sizeof(uint16_t), &motorCommandQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
@@ -236,7 +239,8 @@ void StartDefaultTask(void *argument)
 /* USER CODE END Header_InputTask_function */
 void InputTask_function(void *argument)
 {
-		mode_motor cmd;
+  /* USER CODE BEGIN InputTask_function */
+		uint16_t cmd;
     for (;;)
     {
 				uint8_t cur_but1=HAL_GPIO_ReadPin(GPIOB,GPIO_PIN_0);
@@ -270,6 +274,7 @@ void InputTask_function(void *argument)
 				prev_but3=cur_but3;
         osDelay(10);
     }
+  /* USER CODE END InputTask_function */
 }
 
 /* USER CODE BEGIN Header_MotorTask_function */
@@ -279,35 +284,42 @@ void InputTask_function(void *argument)
 * @retval None
 */
 /* USER CODE END Header_MotorTask_function */
-void MotorTask_function(void *argument){
+void MotorTask_function(void *argument)
+{
   /* USER CODE BEGIN MotorTask_function */
   /* Infinite loop */
-	mode_motor cmd;
+	uint16_t cmd;
+	HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
   for(;;)
   {
-    if (osMessageQueueGet(motorCommandQueueHandle,&cmd,NULL,osWaitForever) == osOK){
-		switch (cmd)
-            {
-                case FORWARD:
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_SET);
-                    HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);
-                    break;
+    if (osMessageQueueGet(motorCommandQueueHandle,&cmd,NULL,10) == osOK){
+			switch (cmd)
+				{
+					case FORWARD:
+						HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_SET);
+						HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);
+            break;
 
-                case REVERSE:
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_SET);
-                    HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_SET);
-                    break;
+          case REVERSE:
+						HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+					  HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_SET);
+            break;
 
-                case STOP:
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_RESET);
-                    HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
-										HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);
-										
-                    break;
-            }	
-					}
+          case STOP:
+						HAL_GPIO_WritePin(GPIOB,GPIO_PIN_7,GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOB,GPIO_PIN_4,GPIO_PIN_RESET);
+						HAL_GPIO_WritePin(GPIOB,GPIO_PIN_6,GPIO_PIN_RESET);		
+            break;
+          }	
+			}
+			osMutexAcquire(systemStateMutexHandle, osWaitForever);
+			float duty=inf.pwm;
+			osMutexRelease(systemStateMutexHandle);
+			uint32_t arr =__HAL_TIM_GET_AUTORELOAD(&htim1);
+			uint32_t ccr =(uint32_t)((duty* arr) / 100.0f);
+			__HAL_TIM_SET_COMPARE(&htim1,TIM_CHANNEL_1,ccr);
   }
   /* USER CODE END MotorTask_function */
 }
@@ -319,12 +331,20 @@ void MotorTask_function(void *argument){
 * @retval None
 */
 /* USER CODE END Header_EncoderTask_function */
-void EncoderTask_function(void *argument){
+void EncoderTask_function(void *argument)
+{
   /* USER CODE BEGIN EncoderTask_function */
   /* Infinite loop */
+	HAL_TIM_Encoder_Start(&htim2, TIM_CHANNEL_ALL);
   for(;;)
   {
-    osDelay(1);
+		osMutexAcquire(systemStateMutexHandle, osWaitForever);
+		uint16_t total_cnt=__HAL_TIM_GET_COUNTER(&htim2);
+		inf.positionDeg=((float)total_cnt * 360.0f)/cpr;
+		inf.rpm =((float)((int16_t)(total_cnt-prev_cnt)) * 6000.0f) / cpr;
+		prev_cnt=total_cnt;
+		osMutexRelease(systemStateMutexHandle);
+		osDelay(10);
   }
   /* USER CODE END EncoderTask_function */
 }
@@ -415,7 +435,6 @@ void ESPTask_function(void *argument)
   /* USER CODE END ESPTask_function */
 }
 
-
 /* USER CODE BEGIN Header_OTATask_function */
 /**
 * @brief Function implementing the OTATask thread.
@@ -483,3 +502,4 @@ void OTATask_function(void *argument)
 /* USER CODE BEGIN Application */
 
 /* USER CODE END Application */
+
