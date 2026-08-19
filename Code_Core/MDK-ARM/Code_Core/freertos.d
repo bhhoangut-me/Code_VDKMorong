@@ -45,3 +45,4 @@ code_core\freertos.o: ../Core/Inc/adc.h
 code_core\freertos.o: ../Core/Inc/usart.h
 code_core\freertos.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
 code_core\freertos.o: ../Core/Inc/tim.h
+code_core\freertos.o: ../Core/Inc/gpio.h
