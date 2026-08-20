@@ -3,9 +3,9 @@
 <title>Static Call Graph - [Code_Core\Code_Core.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image Code_Core\Code_Core.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060750: Last Updated: Wed Aug 19 11:42:31 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060750: Last Updated: Thu Aug 20 09:57:04 2026
 <BR><P>
-<H3>Maximum Stack Usage =        664 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
+<H3>Maximum Stack Usage =        680 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
 ESPTask_function &rArr; ESP_Init &rArr; ESP_SendCommand &rArr; ESP_FlushUART &rArr; HAL_UART_Receive &rArr; UART_WaitOnFlagUntilTimeout
 <P>
@@ -669,8 +669,8 @@ Global Symbols
 <P><STRONG><a name="[a]"></a>DebugMon_Handler</STRONG> (Thumb, 2 bytes, Stack size 0 bytes, stm32f1xx_it.o(i.DebugMon_Handler))
 <BR>[Address Reference Count : 1]<UL><LI> startup_stm32f103xb.o(RESET)
 </UL>
-<P><STRONG><a name="[40]"></a>ESPTask_function</STRONG> (Thumb, 372 bytes, Stack size 160 bytes, freertos.o(i.ESPTask_function))
-<BR><BR>[Stack]<UL><LI>Max Depth = 664 + Unknown Stack Size
+<P><STRONG><a name="[40]"></a>ESPTask_function</STRONG> (Thumb, 410 bytes, Stack size 176 bytes, freertos.o(i.ESPTask_function))
+<BR><BR>[Stack]<UL><LI>Max Depth = 680 + Unknown Stack Size
 <LI>Call Chain = ESPTask_function &rArr; ESP_Init &rArr; ESP_SendCommand &rArr; ESP_FlushUART &rArr; HAL_UART_Receive &rArr; UART_WaitOnFlagUntilTimeout
 </UL>
 <BR>[Calls]<UL><LI><a href="#[7d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;osMutexRelease
@@ -1181,7 +1181,7 @@ Global Symbols
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> startup_stm32f103xb.o(RESET)
 </UL>
-<P><STRONG><a name="[3e]"></a>MotorTask_function</STRONG> (Thumb, 380 bytes, Stack size 8 bytes, freertos.o(i.MotorTask_function))
+<P><STRONG><a name="[3e]"></a>MotorTask_function</STRONG> (Thumb, 378 bytes, Stack size 8 bytes, freertos.o(i.MotorTask_function))
 <BR><BR>[Stack]<UL><LI>Max Depth = 152<LI>Call Chain = MotorTask_function &rArr; osMutexAcquire &rArr; xQueueTakeMutexRecursive &rArr; xQueueSemaphoreTake &rArr; xTaskResumeAll &rArr; xTaskIncrementTick
 </UL>
 <BR>[Calls]<UL><LI><a href="#[7d]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;osMutexRelease

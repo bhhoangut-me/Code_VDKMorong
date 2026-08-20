@@ -454,23 +454,31 @@ void ESPTask_function(void *argument)
 			osMutexAcquire(systemStateMutexHandle, osWaitForever);
 			int mode_val    = (int)inf.mode;
 			uint32_t adc_val = inf.adc_value;
+			
+			/* Xử lý PWM */
 			int duty_int    = (int)inf.pwm;
 			int duty_dec    = (int)((inf.pwm - duty_int) * 10);
 			if(duty_dec < 0) duty_dec = -duty_dec;
-			int pos_int     = (int)inf.positionDeg;
-			int pos_dec     = (int)((inf.positionDeg - pos_int) * 100);
-			if(pos_dec < 0) pos_dec = -pos_dec;
-			int rpm_int     = (int)inf.rpm;
-			int rpm_dec     = (int)((inf.rpm - rpm_int) * 100);
-			if(rpm_dec < 0) rpm_dec = -rpm_dec;
+			
+			/* Xử lý góc quay Position có dấu */
+			const char* pos_sign = (inf.positionDeg < 0) ? "-" : "";
+			float abs_pos   = (inf.positionDeg < 0) ? -inf.positionDeg : inf.positionDeg;
+			int pos_int     = (int)abs_pos;
+			int pos_dec     = (int)((abs_pos - pos_int) * 100);
+			
+			/* Xử lý tốc độ RPM có dấu */
+			const char* rpm_sign = (inf.rpm < 0) ? "-" : "";
+			float abs_rpm   = (inf.rpm < 0) ? -inf.rpm : inf.rpm;
+			int rpm_int     = (int)abs_rpm;
+			int rpm_dec     = (int)((abs_rpm - rpm_int) * 100);
 			osMutexRelease(systemStateMutexHandle);
 
 			snprintf(txbuf, sizeof(txbuf),
-				"Boot : Mode:%d,ADC:%u,Duty:%d.%d,Pos:%d.%02d,RPM:%d.%02d\n",
+				"Boot : Mode:%d,ADC:%u,Duty:%d.%d,Pos:%s%d.%02d,RPM:%s%d.%02d\n",
 				mode_val, (unsigned int)adc_val,
 				duty_int, duty_dec,
-				pos_int, pos_dec,
-				rpm_int, rpm_dec);
+				pos_sign, pos_int, pos_dec,
+				rpm_sign, rpm_int, rpm_dec);
 			if(!ESP_SendData(txbuf)){
 				fail_count++;
 				if(fail_count >= 5){
