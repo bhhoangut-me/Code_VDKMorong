@@ -108,73 +108,101 @@ uint8_t ESP_Init(const char *serverIP, uint16_t port)
 uint8_t ESP_SendData(const char *data)
 {
     char cmd[32];
-    char resp[64] = {0};
     uint16_t len = strlen(data);
     uint8_t byte;
     uint8_t got_prompt = 0;
-    uint16_t ri = 0;
     uint32_t start;
+    char resp[64] = {0};
+    uint16_t ri = 0;
 
-    ESP_FlushUART();
+    /* Xoa co overrun UART */
+    __HAL_UART_CLEAR_OREFLAG(&huart1);
+    
+    /* Flush nhanh - chi doc toi da 32 byte con lai trong buffer */
+    {
+        uint8_t dummy;
+        int flush_count = 0;
+        while (flush_count < 32 && HAL_UART_Receive(&huart1, &dummy, 1, 1) == HAL_OK)
+        {
+            flush_count++;
+        }
+    }
     
     /* Gui lenh CIPSEND */
     snprintf(cmd, sizeof(cmd), "AT+CIPSEND=%u\r\n", len);
-    HAL_UART_Transmit(&huart1, (uint8_t *)cmd, strlen(cmd), 1000);
+    HAL_UART_Transmit(&huart1, (uint8_t *)cmd, strlen(cmd), 500);
 
-    /* Doi dau '>' */
+    /* Doi dau '>' - timeout ngan 1s */
     start = HAL_GetTick();
-    while ((HAL_GetTick() - start) < 3000)
+    while ((HAL_GetTick() - start) < 1000)
     {
-        if (HAL_UART_Receive(&huart1, &byte, 1, 100) == HAL_OK)
+        if (HAL_UART_Receive(&huart1, &byte, 1, 20) == HAL_OK)
         {
             if (byte == '>')
             {
                 got_prompt = 1;
                 break;
             }
-        }
-    }
-
-    if (got_prompt)
-    {
-        osDelay(10);
-        HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 2000);
-
-        /* Doi SEND OK (xac nhan ESP da gui qua TCP) */
-        ri = 0;
-        memset(resp, 0, sizeof(resp));
-        start = HAL_GetTick();
-        while ((HAL_GetTick() - start) < 3000)
-        {
-            if (HAL_UART_Receive(&huart1, &byte, 1, 100) == HAL_OK)
+            /* Phat hien CLOSED -> connection da mat */
+            if (byte == 'C' || byte == 'E')
             {
-                if (ri < sizeof(resp) - 1)
+                /* Doc them vai byte xem co phai CLOSED/ERROR khong */
+                resp[0] = byte;
+                ri = 1;
+                uint32_t s2 = HAL_GetTick();
+                while (ri < 10 && (HAL_GetTick() - s2) < 100)
                 {
-                    resp[ri++] = byte;
-                    resp[ri] = '\0';
+                    if (HAL_UART_Receive(&huart1, &byte, 1, 10) == HAL_OK)
+                    {
+                        resp[ri++] = byte;
+                        resp[ri] = '\0';
+                    }
                 }
-                if (strstr(resp, "SEND OK") != NULL)
+                if (strstr(resp, "CLOSED") != NULL || strstr(resp, "ERROR") != NULL)
                 {
-                    // Nhay LED PA5 (bao hieu gui OK)
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
-                    osDelay(30);
-                    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
-                    return 1;
-                }
-                if (strstr(resp, "ERROR") != NULL || strstr(resp, "CLOSED") != NULL)
-                {
-                    break;
+                    return 2; /* Ma loi dac biet: connection mat */
                 }
             }
         }
     }
 
-    // Nhay LED PA7 (bao loi)
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
-    osDelay(30);
-    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+    if (!got_prompt)
+    {
+        return 0;
+    }
+
+    /* Gui data ngay lap tuc */
+    HAL_UART_Transmit(&huart1, (uint8_t *)data, len, 1000);
+
+    /* Doi SEND OK - timeout 1.5s */
+    ri = 0;
+    memset(resp, 0, sizeof(resp));
+    start = HAL_GetTick();
+    while ((HAL_GetTick() - start) < 1500)
+    {
+        if (HAL_UART_Receive(&huart1, &byte, 1, 20) == HAL_OK)
+        {
+            if (ri < sizeof(resp) - 1)
+            {
+                resp[ri++] = byte;
+                resp[ri] = '\0';
+            }
+            if (strstr(resp, "SEND OK") != NULL)
+            {
+                return 1; /* Thanh cong */
+            }
+            if (strstr(resp, "CLOSED") != NULL)
+            {
+                return 2; /* Connection mat */
+            }
+            if (strstr(resp, "ERROR") != NULL || strstr(resp, "SEND FAIL") != NULL)
+            {
+                return 0; /* Loi gui */
+            }
+        }
+    }
     
-    return 0;
+    return 0; /* Timeout */
 }
 
 void OTA_TriggerUpdate(void)

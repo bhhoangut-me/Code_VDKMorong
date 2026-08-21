@@ -427,6 +427,7 @@ void ESPTask_function(void *argument)
   extern uint8_t esp_step;
   
   uint8_t fail_count = 0;
+  uint8_t connection_lost = 0;
 
   /* Thu ket noi lien tuc cho den khi duoc */
   while(!esp_connected){
@@ -445,58 +446,76 @@ void ESPTask_function(void *argument)
   }
 
   /* Doi TCP connection on dinh truoc khi gui */
-  osDelay(1000);
+  osDelay(500);
 
   for(;;)
   {
-    if(esp_connected){
-			/* Mutex bao ve doc inf */
-			osMutexAcquire(systemStateMutexHandle, osWaitForever);
-			int mode_val    = (int)inf.mode;
-			uint32_t adc_val = inf.adc_value;
-			
-			/* Xử lý PWM */
-			int duty_int    = (int)inf.pwm;
-			int duty_dec    = (int)((inf.pwm - duty_int) * 10);
-			if(duty_dec < 0) duty_dec = -duty_dec;
-			
-			/* Xử lý góc quay Position có dấu */
-			const char* pos_sign = (inf.positionDeg < 0) ? "-" : "";
-			float abs_pos   = (inf.positionDeg < 0) ? -inf.positionDeg : inf.positionDeg;
-			int pos_int     = (int)abs_pos;
-			int pos_dec     = (int)((abs_pos - pos_int) * 100);
-			
-			/* Xử lý tốc độ RPM có dấu */
-			const char* rpm_sign = (inf.rpm < 0) ? "-" : "";
-			float abs_rpm   = (inf.rpm < 0) ? -inf.rpm : inf.rpm;
-			int rpm_int     = (int)abs_rpm;
-			int rpm_dec     = (int)((abs_rpm - rpm_int) * 100);
-			osMutexRelease(systemStateMutexHandle);
+    /* ====== XU LY RECONNECT NEU CONNECTION MAT ====== */
+    if(!esp_connected || connection_lost){
+      connection_lost = 0;
+      esp_connected = 0;
+      ESP_SendCommand("AT+CIPCLOSE\r\n", "OK", 1000);
+      osDelay(500);
+      if(ESP_Init("172.20.10.7", 8000)){
+        esp_connected = 1;
+        fail_count = 0;
+        osDelay(300);
+      } else {
+        osDelay(2000);
+        continue;
+      }
+    }
 
-			snprintf(txbuf, sizeof(txbuf),
-				"Boot : Mode:%d,ADC:%u,Duty:%d.%d,Pos:%s%d.%02d,RPM:%s%d.%02d\n",
-				mode_val, (unsigned int)adc_val,
-				duty_int, duty_dec,
-				pos_sign, pos_int, pos_dec,
-				rpm_sign, rpm_int, rpm_dec);
-			if(!ESP_SendData(txbuf)){
-				fail_count++;
-				if(fail_count >= 5){
-					/* Reconnect */
-					esp_connected = 0;
-					ESP_SendCommand("AT+CIPCLOSE\r\n", "OK", 2000);
-					osDelay(1000);
-					if(ESP_Init("172.20.10.7", 8000)){
-						esp_connected = 1;
-						osDelay(1000);
-					}
-					fail_count = 0;
-				}
-			} else {
-				fail_count = 0;
-			}
-		}
-		osDelay(100);
+    /* ====== DOC DATA VA GUI ====== */
+    osMutexAcquire(systemStateMutexHandle, osWaitForever);
+    int mode_val    = (int)inf.mode;
+    uint32_t adc_val = inf.adc_value;
+    
+    int duty_int    = (int)inf.pwm;
+    int duty_dec    = (int)((inf.pwm - duty_int) * 10);
+    if(duty_dec < 0) duty_dec = -duty_dec;
+    
+    const char* pos_sign = (inf.positionDeg < 0) ? "-" : "";
+    float abs_pos   = (inf.positionDeg < 0) ? -inf.positionDeg : inf.positionDeg;
+    int pos_int     = (int)abs_pos;
+    int pos_dec     = (int)((abs_pos - pos_int) * 100);
+    
+    const char* rpm_sign = (inf.rpm < 0) ? "-" : "";
+    float abs_rpm   = (inf.rpm < 0) ? -inf.rpm : inf.rpm;
+    int rpm_int     = (int)abs_rpm;
+    int rpm_dec     = (int)((abs_rpm - rpm_int) * 100);
+    osMutexRelease(systemStateMutexHandle);
+
+    snprintf(txbuf, sizeof(txbuf),
+      "Boot : Mode:%d,ADC:%u,Duty:%d.%d,Pos:%s%d.%02d,RPM:%s%d.%02d\n",
+      mode_val, (unsigned int)adc_val,
+      duty_int, duty_dec,
+      pos_sign, pos_int, pos_dec,
+      rpm_sign, rpm_int, rpm_dec);
+    
+    uint8_t result = ESP_SendData(txbuf);
+    
+    if(result == 1){
+      /* Gui thanh cong */
+      fail_count = 0;
+    } 
+    else if(result == 2){
+      /* Connection CLOSED - reconnect ngay */
+      connection_lost = 1;
+      fail_count = 0;
+    }
+    else {
+      /* Send fail - thu lai */
+      fail_count++;
+      if(fail_count >= 5){
+        /* 5 lan fail -> reconnect */
+        connection_lost = 1;
+        fail_count = 0;
+      }
+      osDelay(50);
+    }
+    
+    osDelay(80);
   }
   /* USER CODE END ESPTask_function */
 }
