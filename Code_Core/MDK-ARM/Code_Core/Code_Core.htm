@@ -3,7 +3,7 @@
 <title>Static Call Graph - [Code_Core\Code_Core.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image Code_Core\Code_Core.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060750: Last Updated: Fri Aug 21 17:45:06 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060750: Last Updated: Sun Aug 23 21:50:12 2026
 <BR><P>
 <H3>Maximum Stack Usage =        672 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -1126,7 +1126,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[54]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;main
 </UL>
 
-<P><STRONG><a name="[b9]"></a>MX_GPIO_Init</STRONG> (Thumb, 142 bytes, Stack size 48 bytes, gpio.o(i.MX_GPIO_Init))
+<P><STRONG><a name="[b9]"></a>MX_GPIO_Init</STRONG> (Thumb, 138 bytes, Stack size 48 bytes, gpio.o(i.MX_GPIO_Init))
 <BR><BR>[Stack]<UL><LI>Max Depth = 88<LI>Call Chain = MX_GPIO_Init &rArr; HAL_GPIO_Init
 </UL>
 <BR>[Calls]<UL><LI><a href="#[77]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;HAL_GPIO_WritePin
@@ -1200,7 +1200,7 @@ Global Symbols
 </UL>
 <BR>[Address Reference Count : 1]<UL><LI> startup_stm32f103xb.o(RESET)
 </UL>
-<P><STRONG><a name="[41]"></a>OTATask_function</STRONG> (Thumb, 222 bytes, Stack size 0 bytes, freertos.o(i.OTATask_function))
+<P><STRONG><a name="[41]"></a>OTATask_function</STRONG> (Thumb, 188 bytes, Stack size 0 bytes, freertos.o(i.OTATask_function))
 <BR><BR>[Stack]<UL><LI>Max Depth = 72<LI>Call Chain = OTATask_function &rArr; osDelay &rArr; vTaskDelay &rArr; xTaskResumeAll &rArr; xTaskIncrementTick
 </UL>
 <BR>[Calls]<UL><LI><a href="#[75]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;osDelay

@@ -530,13 +530,11 @@ void ESPTask_function(void *argument)
 void OTATask_function(void *argument)
 {
   /* USER CODE BEGIN OTATask_function */
-  /* Nhan giu dong thoi PB0 + PB11 trong 3 giay de kich hoat OTA */
-  uint8_t was_pressed = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET &&
-                         HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == GPIO_PIN_RESET);
+  /* Nhan giu PB12 trong 3 giay de kich hoat OTA */
+  uint8_t was_pressed = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_RESET);
   for(;;)
   {
-    uint8_t is_pressed = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET &&
-                          HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == GPIO_PIN_RESET);
+    uint8_t is_pressed = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_RESET);
 
     /* Chi kich hoat khi co su thay doi tu NHA sang NHAN (Edge Detection) */
     if (is_pressed && !was_pressed)
@@ -546,8 +544,7 @@ void OTATask_function(void *argument)
 
       while (held && (HAL_GetTick() - press_start) < 3000)
       {
-        if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) != GPIO_PIN_RESET ||
-            HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) != GPIO_PIN_RESET)
+        if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) != GPIO_PIN_RESET)
         {
           held = 0;
         }
@@ -569,8 +566,7 @@ void OTATask_function(void *argument)
         OTA_TriggerUpdate();
         
         /* Neu vi ly do nao do chua reset duoc thi doi nha nut ra */
-        while(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0) == GPIO_PIN_RESET &&
-              HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_11) == GPIO_PIN_RESET)
+        while(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_12) == GPIO_PIN_RESET)
         {
              osDelay(100);
         }
