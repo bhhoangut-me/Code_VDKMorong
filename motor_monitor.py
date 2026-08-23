@@ -1,0 +1,670 @@
+"""
+STM32 Motor Control System — Python Monitor v2.0
+=================================================
+Data format: Boot : Mode:X,ADC:XXXX,Duty:XX.X,Pos:XX.XX,RPM:XX.XX
+Mode: 0=FORWARD  1=REVERSE  2=STOP
+"""
+
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import threading
+import socket
+import time
+import csv
+import os
+import sys
+from collections import deque
+
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+import numpy as np
+
+# ════════════════════════════════════════════════════
+#  CONFIG
+# ════════════════════════════════════════════════════
+DEFAULT_PORT    = 8000
+PLOT_WINDOW     = 30
+MAX_POINTS      = 2000
+DATA_TIMEOUT    = 3.0
+RECONNECT_TMO   = 8.0
+REFRESH_MS      = 80        # GUI refresh ~12fps
+
+# ════════════════════════════════════════════════════
+#  PALETTE
+# ════════════════════════════════════════════════════
+C = {
+    "bg"      : "#0B0D12",
+    "surface" : "#13151C",
+    "card"    : "#181B24",
+    "border"  : "#252836",
+    "cyan"    : "#00D4FF",
+    "green"   : "#00F5A0",
+    "orange"  : "#FF8C42",
+    "red"     : "#FF4560",
+    "yellow"  : "#FFD166",
+    "pink"    : "#FF6B9D",
+    "purple"  : "#A78BFA",
+    "text"    : "#D0D5E0",
+    "dim"     : "#555B6E",
+    "white"   : "#FFFFFF",
+}
+
+# Chart colors per signal
+CHART_CLR = {
+    "adc" : C["cyan"],
+    "duty": C["green"],
+    "pos" : C["orange"],
+    "rpm" : C["pink"],
+}
+
+# ════════════════════════════════════════════════════
+#  DATA STORE  (thread-safe)
+# ════════════════════════════════════════════════════
+class DataStore:
+    def __init__(self):
+        self.lock          = threading.Lock()
+        self.t_start       = None
+        self.times         = deque(maxlen=MAX_POINTS)
+        self.adc           = deque(maxlen=MAX_POINTS)
+        self.duty          = deque(maxlen=MAX_POINTS)
+        self.pos           = deque(maxlen=MAX_POINTS)
+        self.rpm           = deque(maxlen=MAX_POINTS)
+        self.mode          = 2
+        self.packet_count  = 0
+        self.rx_rate       = 0.0
+        self.last_raw      = ""
+        self.last_rx_time  = 0.0
+        self.connected     = False
+        self.data_ok       = False
+        self.client_ip     = ""
+
+    def reset_data(self):
+        """Clear chart data only."""
+        with self.lock:
+            self.times.clear()
+            self.adc.clear()
+            self.duty.clear()
+            self.pos.clear()
+            self.rpm.clear()
+            self.packet_count = 0
+            self.rx_rate      = 0.0
+            self.t_start      = None
+
+    def snapshot(self):
+        """Return a copy of current arrays (call inside lock)."""
+        return (
+            list(self.times), list(self.adc),
+            list(self.duty),  list(self.pos), list(self.rpm),
+        )
+
+store = DataStore()
+
+# ════════════════════════════════════════════════════
+#  PACKET PARSER
+# ════════════════════════════════════════════════════
+def parse_packet(raw: str):
+    """
+    Input : 'Boot : Mode:0,ADC:2048,Duty:50.0,Pos:-45.50,RPM:120.75'
+    Output: dict or None
+    """
+    line = raw.replace("Boot : ", "").strip()
+    result = {}
+    try:
+        for part in line.split(","):
+            if ":" not in part:
+                continue
+            key, _, rest = part.partition(":")
+            key = key.strip()
+            val = float(rest.strip())
+            if   key == "Mode": result["mode"] = int(val)
+            elif key == "ADC":  result["adc"]  = val
+            elif key == "Duty": result["duty"] = val
+            elif key == "Pos":  result["pos"]  = val
+            elif key == "RPM":  result["rpm"]  = val
+    except Exception:
+        return None
+    return result if len(result) == 5 else None
+
+# ════════════════════════════════════════════════════
+#  TCP SERVER THREAD
+# ════════════════════════════════════════════════════
+class TCPServerThread(threading.Thread):
+    def __init__(self, app):
+        super().__init__(daemon=True)
+        self.app   = app
+        self._stop = threading.Event()
+        self._port = DEFAULT_PORT
+
+    def set_port(self, port):
+        self._port = port
+
+    def stop(self):
+        self._stop.set()
+
+    def run(self):
+        while not self._stop.is_set():
+            self._serve_once()
+
+    def _serve_once(self):
+        self.app.ui_set_status("WAITING FOR ESP-01...", C["yellow"])
+        self.app.ui_set_dot("tcp",  False)
+        self.app.ui_set_dot("data", False)
+        with store.lock:
+            store.connected = False
+            store.data_ok   = False
+
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            srv.bind(("0.0.0.0", self._port))
+            srv.listen(1)
+            srv.settimeout(1.0)
+        except OSError as e:
+            self.app.ui_set_status(f"PORT {self._port} ERROR: {e}", C["red"])
+            srv.close()
+            time.sleep(3)
+            return
+
+        conn = None
+        while not self._stop.is_set():
+            try:
+                conn, addr = srv.accept()
+                break
+            except socket.timeout:
+                continue
+
+        srv.close()
+        if conn is None:
+            return
+
+        # ---- Connected ----
+        client_ip = addr[0]
+        with store.lock:
+            store.connected  = True
+            store.client_ip  = client_ip
+            store.last_rx_time = time.time()
+        self.app.ui_set_status(
+            f"ESP-01 CONNECTED  ●  {client_ip}  |  PORT {self._port}", C["green"])
+        self.app.ui_set_dot("tcp", True)
+
+        buf           = ""
+        rate_packets  = 0
+        rate_t        = time.time()
+        last_pkt_t    = time.time()
+
+        conn.settimeout(0.3)
+
+        try:
+            while not self._stop.is_set():
+                # ---- Receive ----
+                try:
+                    chunk = conn.recv(2048).decode("utf-8", errors="ignore")
+                    if not chunk:
+                        break
+                    buf += chunk
+                except socket.timeout:
+                    chunk = None
+
+                # ---- Parse lines ----
+                while "\n" in buf:
+                    line, buf = buf.split("\n", 1)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parsed = parse_packet(line)
+                    if parsed is None:
+                        continue
+
+                    now = time.time()
+                    with store.lock:
+                        if store.t_start is None:
+                            store.t_start = now
+                        t_rel = now - store.t_start
+
+                        store.times.append(t_rel)
+                        store.adc.append(parsed["adc"])
+                        store.duty.append(parsed["duty"])
+                        store.pos.append(parsed["pos"])
+                        store.rpm.append(parsed["rpm"])
+                        store.mode         = parsed["mode"]
+                        store.packet_count += 1
+                        store.last_raw     = line
+                        store.last_rx_time = now
+                        store.data_ok      = True
+                        rate_packets      += 1
+
+                    last_pkt_t = now
+                    self.app.ui_set_dot("data", True)
+
+                    # RX Rate
+                    elapsed = now - rate_t
+                    if elapsed >= 1.0:
+                        with store.lock:
+                            store.rx_rate = rate_packets / elapsed
+                        rate_packets = 0
+                        rate_t = now
+
+                # ---- Watchdogs ----
+                idle = time.time() - last_pkt_t
+                if store.data_ok and idle > DATA_TIMEOUT:
+                    with store.lock:
+                        store.data_ok = False
+                    self.app.ui_set_dot("data", False)
+                    self.app.ui_set_status(
+                        f"ESP-01 CONNECTED  ●  {client_ip}  |  NO DATA ({idle:.0f}s)",
+                        C["orange"])
+
+                if idle > RECONNECT_TMO and store.packet_count > 0:
+                    break   # force reconnect
+
+        except Exception:
+            pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            with store.lock:
+                store.connected = False
+                store.data_ok   = False
+            self.app.ui_set_dot("tcp",  False)
+            self.app.ui_set_dot("data", False)
+
+# ════════════════════════════════════════════════════
+#  HELPER WIDGETS
+# ════════════════════════════════════════════════════
+def sep(parent, color=None, orient="h", padx=0, pady=4):
+    color = color or C["border"]
+    if orient == "h":
+        tk.Frame(parent, bg=color, height=1).pack(fill="x", padx=padx, pady=pady)
+    else:
+        tk.Frame(parent, bg=color, width=1).pack(fill="y", padx=padx, pady=pady, side="left")
+
+# ════════════════════════════════════════════════════
+#  MAIN APPLICATION
+# ════════════════════════════════════════════════════
+class App:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("STM32 Motor Control Monitor")
+        self.root.geometry("1380x820")
+        self.root.minsize(1100, 700)
+        self.root.configure(bg=C["bg"])
+
+        self._server : TCPServerThread = None
+        self._port_var = tk.IntVar(value=DEFAULT_PORT)
+        self._pw_var   = tk.IntVar(value=PLOT_WINDOW)
+
+        self._build_ui()
+        self._start_server()
+        self._schedule_update()
+
+    # ──────────────────────────────────────────────
+    #  BUILD UI
+    # ──────────────────────────────────────────────
+    def _build_ui(self):
+        # ===== TOP BAR =====
+        top = tk.Frame(self.root, bg=C["surface"], pady=0)
+        top.pack(fill="x", side="top")
+
+        # Left: title + subtitle
+        tl = tk.Frame(top, bg=C["surface"])
+        tl.pack(side="left", padx=16, pady=10)
+        tk.Label(tl, text="STM32  MOTOR CONTROL", font=("Segoe UI", 18, "bold"),
+                 fg=C["cyan"], bg=C["surface"]).pack(anchor="w")
+        tk.Label(tl, text="Realtime TCP Monitor  |  ESP-01  |  FreeRTOS",
+                 font=("Segoe UI", 9), fg=C["dim"], bg=C["surface"]).pack(anchor="w")
+
+        # Right: controls
+        ctrl = tk.Frame(top, bg=C["surface"])
+        ctrl.pack(side="right", padx=16, pady=8)
+
+        # Port
+        tk.Label(ctrl, text="Port:", font=("Segoe UI", 9), fg=C["dim"],
+                 bg=C["surface"]).grid(row=0, column=0, sticky="e", padx=(0,4))
+        port_entry = tk.Entry(ctrl, textvariable=self._port_var, width=6,
+                              bg=C["card"], fg=C["text"], insertbackground=C["text"],
+                              relief="flat", font=("Consolas", 10), bd=0)
+        port_entry.grid(row=0, column=1, padx=(0,8), ipady=3)
+
+        # Window
+        tk.Label(ctrl, text="Window(s):", font=("Segoe UI", 9), fg=C["dim"],
+                 bg=C["surface"]).grid(row=0, column=2, sticky="e", padx=(0,4))
+        pw_entry = tk.Entry(ctrl, textvariable=self._pw_var, width=5,
+                            bg=C["card"], fg=C["text"], insertbackground=C["text"],
+                            relief="flat", font=("Consolas", 10), bd=0)
+        pw_entry.grid(row=0, column=3, padx=(0,10), ipady=3)
+
+        # Buttons
+        self._btn_clear = self._mk_btn(ctrl, "⟳  Clear Chart", self._clear_chart, C["purple"])
+        self._btn_clear.grid(row=0, column=4, padx=4)
+        self._btn_csv = self._mk_btn(ctrl, "⬇  Export CSV", self._export_csv, C["green"])
+        self._btn_csv.grid(row=0, column=5, padx=4)
+        self._btn_restart = self._mk_btn(ctrl, "↺  Reconnect", self._restart_server, C["yellow"])
+        self._btn_restart.grid(row=0, column=6, padx=4)
+
+        # ===== STATUS BAR =====
+        sb = tk.Frame(self.root, bg=C["card"], pady=0)
+        sb.pack(fill="x")
+        tk.Frame(sb, bg=C["cyan"], width=4).pack(side="left", fill="y")
+        self._status_lbl = tk.Label(sb, text="INITIALIZING...",
+                                    font=("Segoe UI", 10, "bold"),
+                                    fg=C["yellow"], bg=C["card"], pady=6, padx=10)
+        self._status_lbl.pack(side="left")
+
+        # Right: indicators
+        ind = tk.Frame(sb, bg=C["card"])
+        ind.pack(side="right", padx=12)
+        self._dot_tcp  = self._mk_dot(ind, "TCP")
+        self._dot_data = self._mk_dot(ind, "DATA")
+
+        # ===== VALUE CARDS =====
+        cards_wrap = tk.Frame(self.root, bg=C["bg"])
+        cards_wrap.pack(fill="x", padx=10, pady=(8, 4))
+
+        card_defs = [
+            ("MOTOR MODE",   "STOP",        C["red"],    "_mode_var",  "_mode_lbl"),
+            ("ADC  (0-4095)","0",           C["cyan"],   "_adc_var",   None),
+            ("PWM DUTY",     "0.0 %",       C["green"],  "_duty_var",  None),
+            ("POSITION",     "0.00 °",      C["orange"], "_pos_var",   None),
+            ("MOTOR SPEED",  "0.00 RPM",    C["pink"],   "_rpm_var",   None),
+        ]
+        for label, init, color, vattr, lattr in card_defs:
+            var, lbl = self._mk_card(cards_wrap, label, init, color)
+            setattr(self, vattr, var)
+            if lattr:
+                setattr(self, lattr, lbl)
+
+        # ===== NETWORK INFO STRIP =====
+        net = tk.Frame(self.root, bg=C["surface"])
+        net.pack(fill="x", padx=10, pady=(0, 6))
+
+        info_items = [
+            ("_pkt_var",  "Packets: 0",         C["green"]),
+            ("_rate_var", "RX: 0.0 pkt/s",       C["green"]),
+            ("_rx_var",   "Last RX: --:--:--",   C["yellow"]),
+            ("_ip_var",   "Client: ---",          C["cyan"]),
+        ]
+        for attr, init, color in info_items:
+            v = tk.StringVar(value=init)
+            setattr(self, attr, v)
+            tk.Label(net, textvariable=v, font=("Consolas", 9),
+                     fg=color, bg=C["surface"], padx=16).pack(side="left")
+
+        # ===== CHARTS =====
+        chart_frame = tk.Frame(self.root, bg=C["bg"])
+        chart_frame.pack(fill="both", expand=True, padx=10, pady=(0, 4))
+
+        self._fig = Figure(facecolor=C["bg"], figsize=(15, 4.5))
+        self._fig.subplots_adjust(left=0.055, right=0.985,
+                                   top=0.88, bottom=0.14,
+                                   wspace=0.30, hspace=0.55)
+        self._axes  = {}
+        self._lines = {}
+        self._fills = {}
+
+        chart_defs = [
+            ("adc",  2, 1, "ADC INPUT",       "ADC Value",    [0, 4095]),
+            ("duty", 2, 2, "PWM DUTY CYCLE",  "Duty (%)",     [0, 100]),
+            ("pos",  2, 3, "MOTOR POSITION",  "Position (°)", None),
+            ("rpm",  2, 4, "MOTOR SPEED",     "Speed (RPM)",  None),
+        ]
+        for key, rows, col, title, ylabel, ylim in chart_defs:
+            ax = self._fig.add_subplot(1, 4, col, facecolor=C["card"])
+            color = CHART_CLR[key]
+
+            line,  = ax.plot([], [], color=color, linewidth=1.8, zorder=3)
+            fill   = ax.fill_between([], [], alpha=0.12, color=color, zorder=2)
+
+            ax.set_title(title, color=C["text"], fontsize=8.5,
+                         fontweight="bold", pad=5)
+            ax.set_xlabel("Time (s)", color=C["dim"], fontsize=7.5, labelpad=3)
+            ax.set_ylabel(ylabel,     color=C["dim"], fontsize=7.5, labelpad=3)
+            ax.tick_params(colors=C["dim"], labelsize=7, length=3)
+            ax.grid(True, color=C["border"], linewidth=0.6, linestyle="--", alpha=0.7)
+            for sp in ax.spines.values():
+                sp.set_edgecolor(C["border"])
+            if ylim:
+                ax.set_ylim(ylim)
+            if key == "rpm":
+                ax.axhline(0, color=C["dim"], linewidth=0.7, linestyle="--", zorder=1)
+
+            self._axes[key]  = ax
+            self._lines[key] = line
+            self._fills[key] = fill
+
+        canvas = FigureCanvasTkAgg(self._fig, master=chart_frame)
+        canvas.draw()
+        canvas.get_tk_widget().configure(bg=C["bg"], highlightthickness=0)
+        canvas.get_tk_widget().pack(fill="both", expand=True)
+        self._canvas = canvas
+
+        # ===== RAW DATA FOOTER =====
+        foot = tk.Frame(self.root, bg="#08090D")
+        foot.pack(fill="x", side="bottom")
+        tk.Frame(foot, bg=C["dim"], height=1).pack(fill="x")
+        self._raw_var = tk.StringVar(value="RAW ▸  waiting for data...")
+        tk.Label(foot, textvariable=self._raw_var,
+                 font=("Consolas", 8), fg=C["dim"], bg="#08090D",
+                 anchor="w", pady=3).pack(fill="x", padx=10)
+
+    # ──────────────────────────────────────────────
+    #  WIDGET HELPERS
+    # ──────────────────────────────────────────────
+    def _mk_btn(self, parent, text, cmd, color):
+        btn = tk.Label(parent, text=text, font=("Segoe UI", 9, "bold"),
+                       fg=C["bg"], bg=color, padx=10, pady=4, cursor="hand2")
+        btn.bind("<Button-1>", lambda e: cmd())
+        btn.bind("<Enter>",    lambda e: btn.config(bg=self._lighten(color)))
+        btn.bind("<Leave>",    lambda e: btn.config(bg=color))
+        return btn
+
+    @staticmethod
+    def _lighten(hex_color, amt=30):
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        r = min(255, r + amt)
+        g = min(255, g + amt)
+        b = min(255, b + amt)
+        return f"#{r:02X}{g:02X}{b:02X}"
+
+    def _mk_dot(self, parent, label):
+        f = tk.Frame(parent, bg=C["card"])
+        f.pack(side="left", padx=6)
+        dot = tk.Label(f, text="●", font=("Segoe UI", 11),
+                       fg=C["red"], bg=C["card"])
+        dot.pack(side="left", padx=(0, 3))
+        tk.Label(f, text=label, font=("Segoe UI", 8),
+                 fg=C["dim"], bg=C["card"]).pack(side="left")
+        return dot
+
+    def _mk_card(self, parent, label, init, color):
+        frame = tk.Frame(parent, bg=C["card"], padx=14, pady=10,
+                         highlightthickness=1, highlightbackground=C["border"])
+        frame.pack(side="left", expand=True, fill="both", padx=5)
+        tk.Label(frame, text=label, font=("Segoe UI", 8),
+                 fg=C["dim"], bg=C["card"]).pack(anchor="w")
+        tk.Frame(frame, bg=color, height=2).pack(fill="x", pady=(2, 6))
+        var = tk.StringVar(value=init)
+        lbl = tk.Label(frame, textvariable=var,
+                       font=("Segoe UI", 21, "bold"),
+                       fg=color, bg=C["card"], anchor="w")
+        lbl.pack(anchor="w")
+        return var, lbl
+
+    # ──────────────────────────────────────────────
+    #  SERVER
+    # ──────────────────────────────────────────────
+    def _start_server(self):
+        self._server = TCPServerThread(self)
+        self._server.set_port(self._port_var.get())
+        self._server.start()
+
+    def _restart_server(self):
+        if self._server:
+            self._server.stop()
+        store.reset_data()
+        time.sleep(0.3)
+        self._start_server()
+
+    # ──────────────────────────────────────────────
+    #  PERIODIC REFRESH
+    # ──────────────────────────────────────────────
+    def _schedule_update(self):
+        self._update()
+        self.root.after(REFRESH_MS, self._schedule_update)
+
+    def _update(self):
+        with store.lock:
+            if not store.times:
+                return
+            t_arr, adc_arr, duty_arr, pos_arr, rpm_arr = store.snapshot()
+            mode     = store.mode
+            pkt      = store.packet_count
+            rate     = store.rx_rate
+            raw      = store.last_raw
+            lrx      = store.last_rx_time
+            cip      = store.client_ip
+            data_ok  = store.data_ok
+
+        if not t_arr:
+            return
+
+        pw   = max(10, self._pw_var.get())
+        t_now = t_arr[-1]
+        xmin = max(0.0, t_now - pw)
+        xmax = max(float(pw), t_now)
+
+        # ---- Update charts ----
+        arr_map = {"adc": adc_arr, "duty": duty_arr, "pos": pos_arr, "rpm": rpm_arr}
+        for key, line in self._lines.items():
+            ya = arr_map[key]
+            line.set_data(t_arr, ya)
+
+            # Redraw fill
+            self._fills[key].remove()
+            ax   = self._axes[key]
+            color= CHART_CLR[key]
+            self._fills[key] = ax.fill_between(
+                t_arr, ya, alpha=0.10, color=color, zorder=2)
+
+        for ax in self._axes.values():
+            ax.set_xlim(xmin, xmax)
+
+        # Auto-scale pos & rpm
+        if pos_arr:
+            p = max(abs(v) for v in pos_arr[-200:])
+            r = max(10.0, p * 1.25)
+            self._axes["pos"].set_ylim(-r, r)
+        if rpm_arr:
+            r = max(abs(v) for v in rpm_arr[-200:])
+            rng = max(20.0, r * 1.30)
+            self._axes["rpm"].set_ylim(-rng, rng)
+
+        self._canvas.draw_idle()
+
+        # ---- Value cards ----
+        mode_cfg = {
+            0: ("▲  FORWARD", C["green"]),
+            1: ("▼  REVERSE", C["orange"]),
+            2: ("■  STOP",    C["red"]),
+        }
+        m_txt, m_clr = mode_cfg.get(mode, ("?  UNKNOWN", C["dim"]))
+        self._mode_var.set(m_txt)
+        self._mode_lbl.config(fg=m_clr)
+
+        self._adc_var.set(f"{int(adc_arr[-1])}")
+        self._duty_var.set(f"{duty_arr[-1]:.1f} %")
+        self._pos_var.set(f"{pos_arr[-1]:.2f} °")
+        self._rpm_var.set(f"{rpm_arr[-1]:.2f} RPM")
+
+        # ---- Network strip ----
+        self._pkt_var.set(f"Packets: {pkt}")
+        self._rate_var.set(f"RX: {rate:.1f} pkt/s")
+        if lrx > 0:
+            self._rx_var.set("Last RX: " + time.strftime("%H:%M:%S", time.localtime(lrx)))
+        if cip:
+            self._ip_var.set(f"Client: {cip}")
+
+        # ---- Status update ----
+        if store.connected and data_ok and pkt > 0:
+            self.ui_set_status(
+                f"ESP-01 CONNECTED  ●  {cip}  |  PORT {self._port_var.get()}"
+                f"  |  {rate:.1f} pkt/s  |  {pkt} packets received",
+                C["green"])
+
+        # ---- Raw footer ----
+        if raw:
+            self._raw_var.set("RAW ▸  " + raw)
+
+    # ──────────────────────────────────────────────
+    #  THREAD-SAFE UI CALLS
+    # ──────────────────────────────────────────────
+    def ui_set_status(self, text, color):
+        def _do():
+            self._status_lbl.config(text=text, fg=color)
+        self.root.after(0, _do)
+
+    def ui_set_dot(self, key, ok: bool):
+        color = C["green"] if ok else C["red"]
+        def _do():
+            if key == "tcp":
+                self._dot_tcp.config(fg=color)
+            elif key == "data":
+                self._dot_data.config(fg=color)
+        self.root.after(0, _do)
+
+    # ──────────────────────────────────────────────
+    #  ACTIONS
+    # ──────────────────────────────────────────────
+    def _clear_chart(self):
+        store.reset_data()
+        for line in self._lines.values():
+            line.set_data([], [])
+        self._canvas.draw_idle()
+
+    def _export_csv(self):
+        with store.lock:
+            if not store.times:
+                messagebox.showinfo("Export CSV", "Chưa có dữ liệu để xuất!")
+                return
+            t_arr, adc_arr, duty_arr, pos_arr, rpm_arr = store.snapshot()
+
+        path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile=f"motor_data_{time.strftime('%Y%m%d_%H%M%S')}.csv",
+        )
+        if not path:
+            return
+        try:
+            with open(path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Time(s)", "ADC", "Duty(%)", "Position(deg)", "RPM"])
+                for row in zip(t_arr, adc_arr, duty_arr, pos_arr, rpm_arr):
+                    writer.writerow([f"{v:.4f}" for v in row])
+            messagebox.showinfo("Export CSV", f"Đã xuất {len(t_arr)} dòng dữ liệu!\n{path}")
+        except Exception as e:
+            messagebox.showerror("Export CSV", f"Lỗi: {e}")
+
+    # ──────────────────────────────────────────────
+    #  CLOSE
+    # ──────────────────────────────────────────────
+    def on_close(self):
+        if self._server:
+            self._server.stop()
+        self.root.destroy()
+        sys.exit(0)
+
+
+# ════════════════════════════════════════════════════
+#  ENTRY POINT
+# ════════════════════════════════════════════════════
+if __name__ == "__main__":
+    root = tk.Tk()
+    app  = App(root)
+    root.protocol("WM_DELETE_WINDOW", app.on_close)
+    root.mainloop()
