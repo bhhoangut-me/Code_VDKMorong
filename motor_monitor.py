@@ -316,7 +316,11 @@ class App:
         self._btn_disc    = None
 
         self._build_ui()
-        self._start_server()
+        # Do NOT auto-start — user presses Connect manually
+        self._status_lbl.config(
+            text="⏵  Click [Connect] to start listening for ESP-01",
+            fg=C["cyan"])
+        self.ui_update_conn_buttons(connected=False, listening=False)
         self._schedule_update()
 
     # ──────────────────────────────────────────────
@@ -540,16 +544,32 @@ class App:
         """Start listening for a new connection."""
         if self._server and self._server.is_alive():
             return  # already running
+        # Immediate visual feedback
+        self._flash_btn(self._btn_connect, C["cyan"])
+        self._status_lbl.config(
+            text=f"⏵  LISTENING ON PORT {self._port_var.get()}  —  Waiting for ESP-01...",
+            fg=C["cyan"])
         store.reset_data()
         self._start_server()
 
     def _disconnect(self):
         """Stop the TCP server / drop the current client."""
+        # Immediate visual feedback
+        self._flash_btn(self._btn_disc, C["red"])
+        self._status_lbl.config(
+            text="⏹  DISCONNECTING...",
+            fg=C["red"])
         if self._server:
             self._server.disconnect()
         with store.lock:
             store.connected = False
             store.data_ok   = False
+
+    def _flash_btn(self, btn, color, duration_ms=120):
+        """Briefly brighten a button to confirm click."""
+        bright = self._lighten(color, 60)
+        btn.config(bg=bright)
+        self.root.after(duration_ms, lambda: btn.config(bg=color))
 
     def ui_update_conn_buttons(self, connected: bool, listening: bool):
         """Enable/disable Connect and Disconnect buttons (thread-safe)."""
