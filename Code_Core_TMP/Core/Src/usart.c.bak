@@ -1,0 +1,273 @@
+﻿/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    usart.c
+  * @brief   This file provides code for the configuration
+  *          of the USART instances.
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+/* Includes ------------------------------------------------------------------*/
+#include "usart.h"
+#include "string.h"
+#include <stdio.h>
+#include "cmsis_os2.h"
+/* USER CODE BEGIN 0 */
+uint8_t ESP_SendCommand(const char *cmd,
+                        const char *expected,
+                        uint32_t timeout)
+{
+    char rxBuf[256] = {0};
+    uint8_t ch;
+    uint16_t index = 0;
+
+    uint32_t startTick = HAL_GetTick();
+
+    /* Send command */
+    HAL_UART_Transmit(
+        &huart1,
+        (uint8_t *)cmd,
+        strlen(cmd),
+        1000
+    );
+
+    /* Wait response */
+    while ((HAL_GetTick() - startTick) < timeout)
+    {
+        if (HAL_UART_Receive(
+                &huart1,
+                &ch,
+                1,
+                10
+            ) == HAL_OK)
+        {
+            if (index < sizeof(rxBuf) - 1)
+            {
+                rxBuf[index++] = ch;
+                rxBuf[index] = '\0';
+            }
+
+            if (strstr(rxBuf, expected) != NULL)
+            {
+                return 1;
+            }
+
+            if (strstr(rxBuf, "ERROR") != NULL)
+            {
+                return 0;
+            }
+        }
+    }
+
+    return 0;
+}
+
+
+/* =========================================================
+ * 2. INIT ESP + CONNECT TCP
+ * ========================================================= */
+uint8_t ESP_Init(const char *serverIP,
+                 uint16_t port)
+{
+    char cmd[100];
+
+    /* Test ESP */
+    if (!ESP_SendCommand(
+            "AT\r\n",
+            "OK",
+            1000))
+    {
+        return 0;
+    }
+
+    /* Station mode */
+    if (!ESP_SendCommand(
+            "AT+CWMODE=1\r\n",
+            "OK",
+            1000))
+    {
+        return 0;
+    }
+
+    /* Single connection */
+    if (!ESP_SendCommand(
+            "AT+CIPMUX=0\r\n",
+            "OK",
+            1000))
+    {
+        return 0;
+    }
+
+    /* Connect TCP */
+    /* Close any existing connection */
+    ESP_SendCommand("AT+CIPCLOSE\r\n", "OK", 1000);
+    osDelay(500);
+
+    snprintf(
+        cmd,
+        sizeof(cmd),
+        "AT+CIPSTART=\"TCP\",\"%s\",%u\r\n",
+        serverIP,
+        port
+    );
+
+    if (!ESP_SendCommand(
+            cmd,
+            "OK",
+            10000))
+    {
+        return 0;
+    }
+
+    return 1;
+}
+
+
+/* =========================================================
+ * 3. SEND DATA TCP
+ * ========================================================= */
+uint8_t ESP_SendData(const char *data)
+{
+    char cmd[32];
+
+    uint16_t len = strlen(data);
+
+    /* AT+CIPSEND=len */
+    snprintf(
+        cmd,
+        sizeof(cmd),
+        "AT+CIPSEND=%u\r\n",
+        len
+    );
+
+    /* ESP ph?i tr? d?u > */
+    if (!ESP_SendCommand(
+            cmd,
+            ">",
+            2000))
+    {
+        return 0;
+    }
+
+    /* G?i payload */
+    HAL_UART_Transmit(
+        &huart1,
+        (uint8_t *)data,
+        len,
+        1000
+    );
+
+    /*
+     * B?n don gi?n n�y chua ch? SEND OK ? d�y.
+     * Mu?n chu?n hon c� th? th�m receive response sau.
+     */
+
+
+    /* Cho SEND OK */
+    ESP_SendCommand("", "SEND OK", 2000);
+    return 1;
+}
+/* USER CODE END 0 */
+
+UART_HandleTypeDef huart1;
+
+/* USART1 init function */
+
+void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 115200;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
+
+void HAL_UART_MspInit(UART_HandleTypeDef* uartHandle)
+{
+
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  if(uartHandle->Instance==USART1)
+  {
+  /* USER CODE BEGIN USART1_MspInit 0 */
+
+  /* USER CODE END USART1_MspInit 0 */
+    /* USART1 clock enable */
+    __HAL_RCC_USART1_CLK_ENABLE();
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    /**USART1 GPIO Configuration
+    PA9     ------> USART1_TX
+    PA10     ------> USART1_RX
+    */
+    GPIO_InitStruct.Pin = GPIO_PIN_9;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin = GPIO_PIN_10;
+    GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /* USER CODE BEGIN USART1_MspInit 1 */
+
+  /* USER CODE END USART1_MspInit 1 */
+  }
+}
+
+void HAL_UART_MspDeInit(UART_HandleTypeDef* uartHandle)
+{
+
+  if(uartHandle->Instance==USART1)
+  {
+  /* USER CODE BEGIN USART1_MspDeInit 0 */
+
+  /* USER CODE END USART1_MspDeInit 0 */
+    /* Peripheral clock disable */
+    __HAL_RCC_USART1_CLK_DISABLE();
+
+    /**USART1 GPIO Configuration
+    PA9     ------> USART1_TX
+    PA10     ------> USART1_RX
+    */
+    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_9|GPIO_PIN_10);
+
+  /* USER CODE BEGIN USART1_MspDeInit 1 */
+
+  /* USER CODE END USART1_MspDeInit 1 */
+  }
+}
+
+/* USER CODE BEGIN 1 */
+
+/* USER CODE END 1 */
+

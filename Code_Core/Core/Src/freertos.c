@@ -420,6 +420,7 @@ void ESPTask_function(void *argument)
   /* Infinite loop */
 	char txbuf[128];
   uint8_t esp_connected = 0;
+  uint8_t seq = 0;
 
   /* Cho ESP-01 boot va auto-connect WiFi */
   osDelay(2000);
@@ -466,7 +467,7 @@ void ESPTask_function(void *argument)
       }
     }
 
-    /* ====== DOC DATA VA GUI ====== */
+    /* ====== DOC DATA VA GUI JSON ====== */
     osMutexAcquire(systemStateMutexHandle, osWaitForever);
     int mode_val    = (int)inf.mode;
     uint32_t adc_val = inf.adc_value;
@@ -486,12 +487,23 @@ void ESPTask_function(void *argument)
     int rpm_dec     = (int)((abs_rpm - rpm_int) * 100);
     osMutexRelease(systemStateMutexHandle);
 
-    snprintf(txbuf, sizeof(txbuf),
-      "Boot : Mode:%d,ADC:%u,Duty:%d.%d,Pos:%s%d.%02d,RPM:%s%d.%02d\n",
+    /* Build JSON payload (without checksum) */
+    int payload_len = snprintf(txbuf, sizeof(txbuf),
+      "{\"m\":%d,\"a\":%u,\"d\":%d.%d,\"p\":%s%d.%02d,\"r\":%s%d.%02d,\"s\":%u}",
       mode_val, (unsigned int)adc_val,
       duty_int, duty_dec,
       pos_sign, pos_int, pos_dec,
-      rpm_sign, rpm_int, rpm_dec);
+      rpm_sign, rpm_int, rpm_dec,
+      (unsigned int)seq);
+
+    /* Calculate CRC8 on payload */
+    uint8_t crc = CRC8_Calculate((uint8_t*)txbuf, payload_len);
+
+    /* Replace closing '}' with checksum field + newline */
+    snprintf(txbuf + payload_len - 1, sizeof(txbuf) - payload_len + 1,
+      ",\"c\":\"%02X\"}\n", crc);
+
+    seq++; /* uint8_t wraps 0-255 automatically */
     
     uint8_t result = ESP_SendData(txbuf);
     

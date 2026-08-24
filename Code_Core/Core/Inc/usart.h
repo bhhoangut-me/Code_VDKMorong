@@ -28,6 +28,8 @@ uint8_t ESP_Init(const char *serverIP,
 
 uint8_t ESP_SendData(const char *data);
 
+uint8_t CRC8_Calculate(const uint8_t *data, uint16_t len);
+
 void OTA_TriggerUpdate(void);
 /* USER CODE END Includes */
 
