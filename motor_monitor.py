@@ -133,19 +133,25 @@ def parse_packet(raw: str):
 class TCPServerThread(threading.Thread):
     def __init__(self, app):
         super().__init__(daemon=True)
-        self.app   = app
-        self._stop = threading.Event()
-        self._port = DEFAULT_PORT
+        self.app          = app
+        self._stop        = threading.Event()
+        self._manual_stop = threading.Event()  # set when user clicks Disconnect
+        self._port        = DEFAULT_PORT
 
     def set_port(self, port):
         self._port = port
 
     def stop(self):
         self._stop.set()
+        self._manual_stop.set()
+
+    def disconnect(self):
+        """Stop only the current cycle (don't restart)."""
+        self._manual_stop.set()
+        self._stop.set()
 
     def run(self):
-        while not self._stop.is_set():
-            self._serve_once()
+        self._serve_once()
 
     def _serve_once(self):
         self.app.ui_set_status("WAITING FOR ESP-01...", C["yellow"])
@@ -164,11 +170,12 @@ class TCPServerThread(threading.Thread):
         except OSError as e:
             self.app.ui_set_status(f"PORT {self._port} ERROR: {e}", C["red"])
             srv.close()
+            self.app.ui_update_conn_buttons(connected=False, listening=False)
             time.sleep(3)
             return
 
         conn = None
-        while not self._stop.is_set():
+        while not self._stop.is_set() and not self._manual_stop.is_set():
             try:
                 conn, addr = srv.accept()
                 break
@@ -177,6 +184,8 @@ class TCPServerThread(threading.Thread):
 
         srv.close()
         if conn is None:
+            self.app.ui_set_status("DISCONNECTED  —  Click [Connect] to start listening", C["dim"])
+            self.app.ui_update_conn_buttons(connected=False, listening=False)
             return
 
         # ---- Connected ----
@@ -256,8 +265,8 @@ class TCPServerThread(threading.Thread):
                         f"ESP-01 CONNECTED  ●  {client_ip}  |  NO DATA ({idle:.0f}s)",
                         C["orange"])
 
-                if idle > RECONNECT_TMO and store.packet_count > 0:
-                    break   # force reconnect
+                if (idle > RECONNECT_TMO and store.packet_count > 0) or self._manual_stop.is_set():
+                    break   # force reconnect / manual disconnect
 
         except Exception:
             pass
@@ -271,6 +280,13 @@ class TCPServerThread(threading.Thread):
                 store.data_ok   = False
             self.app.ui_set_dot("tcp",  False)
             self.app.ui_set_dot("data", False)
+            # If manually disconnected, show idle message; else let restart loop decide
+            if self._manual_stop.is_set():
+                self.app.ui_set_status(
+                    "DISCONNECTED  —  Click [Connect] to start listening", C["dim"])
+                self.app.ui_update_conn_buttons(connected=False, listening=False)
+            else:
+                self.app.ui_update_conn_buttons(connected=False, listening=True)
 
 # ════════════════════════════════════════════════════
 #  HELPER WIDGETS
@@ -293,9 +309,11 @@ class App:
         self.root.minsize(1100, 700)
         self.root.configure(bg=C["bg"])
 
-        self._server : TCPServerThread = None
-        self._port_var = tk.IntVar(value=DEFAULT_PORT)
-        self._pw_var   = tk.IntVar(value=PLOT_WINDOW)
+        self._server      : TCPServerThread = None
+        self._port_var    = tk.IntVar(value=DEFAULT_PORT)
+        self._pw_var      = tk.IntVar(value=PLOT_WINDOW)
+        self._btn_connect = None
+        self._btn_disc    = None
 
         self._build_ui()
         self._start_server()
@@ -344,6 +362,12 @@ class App:
         self._btn_csv.grid(row=0, column=5, padx=4)
         self._btn_restart = self._mk_btn(ctrl, "↺  Reconnect", self._restart_server, C["yellow"])
         self._btn_restart.grid(row=0, column=6, padx=4)
+
+        # Connect / Disconnect buttons
+        self._btn_connect = self._mk_btn(ctrl, "⏵  Connect",    self._connect,    C["cyan"])
+        self._btn_connect.grid(row=0, column=7, padx=4)
+        self._btn_disc    = self._mk_btn(ctrl, "⏹  Disconnect", self._disconnect,  C["red"])
+        self._btn_disc.grid(row=0, column=8, padx=4)
 
         # ===== STATUS BAR =====
         sb = tk.Frame(self.root, bg=C["card"], pady=0)
@@ -502,6 +526,7 @@ class App:
         self._server = TCPServerThread(self)
         self._server.set_port(self._port_var.get())
         self._server.start()
+        self.ui_update_conn_buttons(connected=False, listening=True)
 
     def _restart_server(self):
         if self._server:
@@ -509,6 +534,37 @@ class App:
         store.reset_data()
         time.sleep(0.3)
         self._start_server()
+
+    # ---- Connect / Disconnect ----
+    def _connect(self):
+        """Start listening for a new connection."""
+        if self._server and self._server.is_alive():
+            return  # already running
+        store.reset_data()
+        self._start_server()
+
+    def _disconnect(self):
+        """Stop the TCP server / drop the current client."""
+        if self._server:
+            self._server.disconnect()
+        with store.lock:
+            store.connected = False
+            store.data_ok   = False
+
+    def ui_update_conn_buttons(self, connected: bool, listening: bool):
+        """Enable/disable Connect and Disconnect buttons (thread-safe)."""
+        def _do():
+            if self._btn_connect is None or self._btn_disc is None:
+                return
+            if listening or connected:
+                # Server is active → only Disconnect makes sense
+                self._btn_connect.config(bg=C["dim"],  fg=C["bg"],  cursor="")
+                self._btn_disc.config(   bg=C["red"],  fg=C["bg"],  cursor="hand2")
+            else:
+                # Server is idle → only Connect makes sense
+                self._btn_connect.config(bg=C["cyan"], fg=C["bg"],  cursor="hand2")
+                self._btn_disc.config(   bg=C["dim"],  fg=C["bg"],  cursor="")
+        self.root.after(0, _do)
 
     # ──────────────────────────────────────────────
     #  PERIODIC REFRESH
