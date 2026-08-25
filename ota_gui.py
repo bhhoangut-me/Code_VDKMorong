@@ -118,7 +118,7 @@ class OTAGui:
         # Tim file Code_Core.bin tu dong
         self.default_bin_path = os.path.abspath(os.path.join(
             os.path.dirname(__file__), 
-            "Code_Core", "MDK-ARM", "Code_Core", "Code_Core.bin"
+            "App_Firmware", "MDK-ARM", "Code_Core", "Code_Core.bin"
         ))
         
         self.setup_ui()
