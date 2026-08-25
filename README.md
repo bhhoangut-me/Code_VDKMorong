@@ -357,7 +357,7 @@ pip install matplotlib numpy
 python motor_monitor.py
 ```
 
-**Hoặc chạy bản đã build:** `dist/MotorMonitor.exe`
+**Hoặc chạy bản đã build:** `GUI_Tools/MotorMonitor.exe`
 
 ---
 
@@ -377,7 +377,7 @@ python motor_monitor.py
 python ota_gui.py
 ```
 
-**Hoặc chạy bản đã build:** `dist/OTA_Server.exe`
+**Hoặc chạy bản đã build:** `GUI_Tools/OTA_Server.exe`
 
 ---
 
@@ -523,5 +523,5 @@ python motor_monitor.py
 
 ---
 
-> 📌 **Tác giả**: Đồ án Vi Điều Khiển — VDK Morong  
+> 📌 **Tác giả**: Đồ án Vi Điều Khiển - Bui Huy Hoang
 > 📌 **MCU**: STM32F103C8T6 | **RTOS**: FreeRTOS | **WiFi**: ESP-01 (AT Command)
