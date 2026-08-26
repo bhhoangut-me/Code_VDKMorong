@@ -142,7 +142,7 @@ class OTAGui:
         
         # Port
         ttk.Label(config_frame, text="Port:").grid(row=1, column=0, sticky="w", pady=5)
-        self.port_var = tk.StringVar(value="8000") # Da thay doi mac dinh thanh 8000 theo code cua ban
+        self.port_var = tk.StringVar(value="8080") # Da thay doi mac dinh thanh 8080 theo code cua ban
         ttk.Entry(config_frame, textvariable=self.port_var, width=10).grid(row=1, column=1, sticky="w", pady=5)
         
         # File Path
